@@ -1,11 +1,9 @@
 import dlib
 import numpy as np
 import face_recognition_models
-from sklearn.svm import SVC
 import streamlit as st
-
+import json
 from src.database.db import get_all_students
-
 
 @st.cache_resource
 def load_dlib_models():
@@ -24,90 +22,70 @@ def get_face_embeddings(image_np):
         encodings.append(np.array(face_descriptor))
     return encodings
 
-@st.cache_resource
-def get_trained_model():
-    X, y = [], []
-    student_db = get_all_students()
-
-    if not student_db:
+def load_embedding(embedding_data):
+    if embedding_data is None:
         return None
-    
-    for student in student_db:
-        embedding = student.get('face_embedding')
-        if embedding:
-            X.append(np.array(embedding))
-            y.append(student.get('student_id'))
+    if isinstance(embedding_data, str):
+        try:
+            embedding_data = json.loads(embedding_data)
+        except:
+            pass
+    if isinstance(embedding_data, list):
+        return np.array(embedding_data)
+    return embedding_data
 
-    if len(X) == 0:
-        return None
+def predict_attendance(class_image_np):
+    st.cache_resource.clear()
     
-    clf = SVC(kernel='linear', probability=True, class_weight='balanced')
-    try:
-        if len(set(y)) >= 2:
-            clf.fit(X, y)
-    except ValueError:
-        pass
-
-    return {'clf': clf, 'X': X, "y": y}
+    # STEP 1: Photo se face detect karo
+    encodings = get_face_embeddings(class_image_np)
+    
+    if len(encodings) == 0:
+        return {'unknown': True}, [], 0
+    
+    # STEP 2: Database se sabhi students load karo
+    all_students = get_all_students()
+    
+    if not all_students:
+        return {'unknown': True}, [], len(encodings)
+    
+    detected_student = {}
+    
+    # STEP 3: HAR EK student se compare karo
+    for encoding in encodings:
+        best_match_id = None
+        best_distance = 999.0
+        
+        for student in all_students:
+            student_id = student.get('student_id')
+            name = student.get('name')
+            embedding = load_embedding(student.get('face_embedding'))
+            
+            if embedding is not None:
+                # Direct euclidean distance
+                distance = np.linalg.norm(embedding - encoding)
+                
+                # DEBUG print
+                print(f"Student ID {student_id} ({name}): Distance = {distance:.4f}")
+                
+                # Agar distance sabse kam ho aur threshold se kam ho
+                if distance < best_distance:
+                    best_distance = distance
+                    best_match_id = student_id
+        
+        print(f"Best match: ID {best_match_id}, Distance {best_distance:.4f}")
+        
+        # MATCH THRESHOLD: 0.6 se increase kiya 0.75 tak
+        if best_match_id is not None and best_distance < 0.75:
+            detected_student[best_match_id] = True
+            print(f"✅ MATCH FOUND! Student ID: {best_match_id}")
+        else:
+            detected_student['unknown'] = True
+            print(f"❌ NO MATCH! Distance too high: {best_distance}")
+    
+    student_ids = list(detected_student.keys())
+    return detected_student, student_ids, len(encodings)
 
 def train_classifier():
     st.cache_resource.clear()
-    model_data = get_trained_model()
-    return bool(model_data)
-
-def predict_attendance(class_image_np):
-    # CRITICAL: Har prediction par purana ziddi server cache clear karo
-    st.cache_resource.clear()
-    
-    encodings = get_face_embeddings(class_image_np)
-    detected_student = {}
-    model_data = get_trained_model()
-
-    if not model_data:
-        if len(encodings) > 0:
-            detected_student['unknown'] = True
-        return detected_student, [], len(encodings)
-    
-    clf = model_data['clf']
-    X_train = model_data['X']
-    y_train = model_data['y']
-    all_students = sorted(list(set(y_train)))
-
-    for encoding in encodings:
-        predicted_id = None
-        is_confident = False
-
-        # FIX 1: Agar 2 ya usse zyada students hain tabhi SVM prediction chalegi
-        if len(all_students) >= 2 and hasattr(clf, "classes_"):
-            probs = clf.predict_proba([encoding])[0]
-            max_prob_idx = np.argmax(probs)
-            if probs[max_prob_idx] >= 0.80:  # Strict 80% confidence boundary
-                predicted_id = int(clf.classes_[max_prob_idx])
-                is_confident = True
-        
-        # FIX 2: Agar database me sirf 1 hi student hai, toh blindly true nahi karenge
-        elif len(all_students) == 1:
-            predicted_id = int(all_students[0])
-            # Is single student ke embedding se aane wale face ka distance check karo
-            distances = [np.linalg.norm(np.array(emb) - encoding) for t_idx, emb in enumerate(X_train) if y_train[t_idx] == predicted_id]
-            min_dist = min(distances) if distances else 999.0
-            
-            # Agar distance 0.45 se kam hai tabhi bolo ki haan ye wahi bacha hai
-            if min_dist <= 0.45:
-                is_confident = True
-            else:
-                is_confident = False  # Warna unknown bna do!
-
-        # FINAL VERIFICATION LAYER
-        if predicted_id is not None and is_confident:
-            distances = [np.linalg.norm(np.array(emb) - encoding) for t_idx, emb in enumerate(X_train) if y_train[t_idx] == predicted_id]
-            min_dist = min(distances) if distances else 999.0
-
-            if min_dist <= 0.45:
-                detected_student[predicted_id] = True
-            else:
-                detected_student['unknown'] = True
-        else:
-            detected_student['unknown'] = True
-
-    return detected_student, all_students, len(encodings)
+    return True
