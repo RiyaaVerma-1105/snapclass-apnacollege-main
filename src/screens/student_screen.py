@@ -89,11 +89,8 @@ def student_dashboard():
 
 
 def student_screen():
-
-
     style_background_dashboard()
     style_base_layout()
-
 
     if "student_data" in st.session_state:
         student_dashboard()
@@ -111,10 +108,14 @@ def student_screen():
     st.space()
     st.space()
     
-    show_registration = False
+    # 1. Registration state ko persist rakhne ke liye Session State use karein
+    if "show_registration" not in st.session_state:
+        st.session_state.show_registration = False
+
     photo_source = st.camera_input("Position your face in the center")
 
-    if photo_source:
+    # Agar abhi tak registration form open nahi hua hai, tabhi AI scan chalega
+    if photo_source and not st.session_state.show_registration:
         img = np.array(Image.open(photo_source))
 
         with st.spinner('AI is scanning..'):
@@ -122,13 +123,13 @@ def student_screen():
 
             if num_faces == 0:
                 st.warning('Face not found!')
-            elif num_faces >1:
+            elif num_faces > 1:
                 st.warning('Multiple faces found')
             else:
                 if detected:
                     student_id = list(detected.keys())[0]
                     all_students = get_all_students()
-                    student = next((s for s in all_students if s['student_id']==student_id), None)
+                    student = next((s for s in all_students if s['student_id'] == student_id), None)
 
                     if student:
                         st.session_state.is_logged_in = True
@@ -139,51 +140,66 @@ def student_screen():
                         st.rerun()
                 else:
                     st.info('Face not recognized! You might be a new student!')
-                    show_registration = True
-    if show_registration:
+                    st.session_state.show_registration = True
+                    st.rerun()  # State update karke rerun karenge taaki form turant dikhe
+
+    # 2. Registration Form Logic (Agar face recognize nahi hua)
+    if st.session_state.show_registration:
         with st.container(border=True):
             st.header('Register new Profile')
-            new_name = st.text_input("Enter your name", placeholder='E.g. Riya Verma')
+            
+            # Streamlit form ka use karenge taaki input daalte hi camera reset na ho
+            with st.form("new_student_register_form"):
+                new_name = st.text_input("Enter your name", placeholder='E.g. Riya Verma')
 
-            st.subheader('Optional : Voice Enrollment')
-            st.info("Enroll your for voice only attendance")
+                st.subheader('Optional : Voice Enrollment')
+                st.info("Enroll your for voice only attendance")
 
+                audio_data = None
+                try:
+                    audio_data = st.audio_input('Record a short phrase like I am present, My name is Akash.')
+                except Exception:
+                    st.error('Audio Data failed!')
 
-            audio_data = None
+                # Form ka submit button
+                submit_registration = st.form_submit_button('Create Account', type='primary')
+                
+                # Agar user form cancel karke firse photo lena chahe
+                cancel_registration = st.form_submit_button('Try Face Login Again', type='secondary')
 
-            try:
-                audio_data = st.audio_input('Record a short phrase like I am present, My name is Akash.')
-            except Exception:
-                st.error('Audio Data failed!')
+            if cancel_registration:
+                st.session_state.show_registration = False
+                st.rerun()
 
-            if st.button('Create Account', type='primary'):
+            if submit_registration:
                 if new_name:
-                    with st.spinner('Creating profile..'):
-                        img = np.array(Image.open(photo_source))
-                        encodings= get_face_embeddings(img)
-                        if encodings:
-                            face_emb = encodings[0].tolist()
+                    if photo_source:  # Ensure image is present
+                        with st.spinner('Creating profile..'):
+                            img = np.array(Image.open(photo_source))
+                            encodings = get_face_embeddings(img)
+                            if encodings:
+                                face_emb = encodings[0].tolist()
 
-                            voice_emb = None
-                            if audio_data:
-                                voice_emb = get_voice_embedding(audio_data.read())
+                                voice_emb = None
+                                if audio_data:
+                                    voice_emb = get_voice_embedding(audio_data.read())
 
-                            response_data = create_student(new_name, face_embedding=face_emb, voice_embedding=voice_emb)
+                                response_data = create_student(new_name, face_embedding=face_emb, voice_embedding=voice_emb)
 
-                            if response_data:
-                                train_classifier()
-                                st.session_state.is_logged_in = True
-                                st.session_state.user_role = 'student'
-                                st.session_state.student_data = response_data[0]
-                                st.toast(f'Profile Created! Hi {new_name}!')
-                                time.sleep(1)
-                                st.rerun()
-                        else:
-                            st.error('Couldnt capture your facial features for registration')
-
+                                if response_data:
+                                    train_classifier()
+                                    st.session_state.is_logged_in = True
+                                    st.session_state.user_role = 'student'
+                                    st.session_state.student_data = response_data[0]
+                                    st.session_state.show_registration = False  # Reset flag
+                                    st.toast(f'Profile Created! Hi {new_name}!')
+                                    time.sleep(1)
+                                    st.rerun()
+                            else:
+                                st.error('Couldnt capture your facial features for registration. Please reposition your face.')
+                    else:
+                        st.error('Please take a photo first!')
                 else:
                     st.warning('Please enter your name!')
 
-
-        
     footer_dashboard()

@@ -10,7 +10,7 @@ supabase==2.0.0
 bcrypt
 segno
 pillow
-streamlit
+
 
 librosa
 resemblyzer
