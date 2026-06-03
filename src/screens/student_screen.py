@@ -14,16 +14,26 @@ from src.components.dialog_enroll import enroll_dialog
 from src.components.subject_card import subject_card
 
 def student_dashboard():
-    student_data = st.session_state.student_data
+    # Safely get current live student data
+    student_data = st.session_state.get('student_data')
+    if not student_data:
+        st.session_state['is_logged_in'] = False
+        st.session_state['login_type'] = None
+        st.rerun()
+        
     student_id = student_data['student_id']
     c1, c2 = st.columns(2, vertical_alignment='center', gap='xxlarge')
     with c1:
         header_dashboard()
     with c2:
-        st.subheader(f"""Welcome, {student_data['name']} """)
+        st.subheader(f"Welcome, {student_data.get('name', 'Student')}")
         if st.button("Logout", type='secondary', key='loginbackbtn', shortcut="control+backspace"):
+            # Deep clean the session state on logout
             st.session_state['is_logged_in'] = False
-            del st.session_state.student_data 
+            st.session_state['login_type'] = None
+            if 'student_data' in st.session_state:
+                del st.session_state['student_data']
+            st.cache_resource.clear() # Clear model cache dynamically
             st.rerun()
 
     st.space()
@@ -44,7 +54,7 @@ def student_dashboard():
     for log in logs:
         sid = log['subject_id']
         if sid not in stats_map:
-            stats_map[sid] = {"total":0, "attended": 0}
+            stats_map[sid] = {"total": 0, "attended": 0}
         stats_map[sid]['total'] += 1
         if log.get('is_present'):
             stats_map[sid]['attended'] += 1
@@ -53,11 +63,11 @@ def student_dashboard():
     for i, sub_node in enumerate(subjects):
         sub = sub_node['subjects']
         sid = sub['subject_id']
-        stats = stats_map.get(sid, {"total":0, "attended": 0})
+        stats = stats_map.get(sid, {"total": 0, "attended": 0})
         
-        def unenroll_button():
-            if st.button("Unenroll from this course", type='tertiary', width='stretch', icon=':material/delete_forever:'):
-                unenroll_student_to_subject(student_id, sid)
+        def unenroll_button(s_id=sid):
+            if st.button("Unenroll from this course", type='tertiary', width='stretch', key=f"unsub_{s_id}", icon=':material/delete_forever:'):
+                unenroll_student_to_subject(student_id, s_id)
                 st.toast(f'Unenrolled successfully!')
                 st.rerun()
 
@@ -74,7 +84,8 @@ def student_screen():
     style_background_dashboard()
     style_base_layout()
 
-    if "student_data" in st.session_state:
+    # Route immediately to dashboard if valid session exists
+    if st.session_state.get('is_logged_in') and "student_data" in st.session_state:
         student_dashboard()
         return
     
@@ -82,8 +93,10 @@ def student_screen():
     with c1:
         header_dashboard()
     with c2:
-        if st.button("Go back to Home", type='secondary', key='loginbackbtn'):
+        if st.button("Go back to Home", type='secondary', key='screenbackbtn'):
             st.session_state['login_type'] = None
+            if 'student_data' in st.session_state:
+                del st.session_state['student_data']
             st.rerun()
 
     st.header('Login using FaceID', text_alignment='center')
@@ -111,11 +124,10 @@ def student_screen():
                 detected, all_ids, num_faces = predict_attendance(img)
 
                 if num_faces == 0:
-                    st.warning('Face not found! Please adjust camera.')
+                    st.warning('Face not found! Please adjust camera layout or increase light.')
                 elif num_faces > 1:
-                    st.warning('Multiple faces detected! Frame check failed.')
+                    st.warning('Multiple faces detected! Single profile validation failed.')
                 else:
-                    # Catch and intercept any trace of unknown string or empty dict
                     is_unknown = False
                     student_id = None
 
@@ -129,7 +141,7 @@ def student_screen():
                         is_unknown = True
 
                     if is_unknown:
-                        st.info('Face not recognized! Redirecting to Registration...')
+                        st.info('Face not recognized! Opening Profile Registration...')
                         st.session_state.saved_photo = photo_source.getvalue()
                         st.session_state.show_registration = True
                         st.rerun()
@@ -141,11 +153,11 @@ def student_screen():
                             st.session_state.is_logged_in = True
                             st.session_state.user_role = 'student'
                             st.session_state.student_data = student
-                            st.toast(f"Welcome Back {student['name']}")
+                            st.toast(f"Welcome Back {student['name']}!")
                             time.sleep(1)
                             st.rerun()
                         else:
-                            st.info('Profile missing from DB! Opening Registration...')
+                            st.info('Profile signature missing from system database. Redirecting...')
                             st.session_state.saved_photo = photo_source.getvalue()
                             st.session_state.show_registration = True
                             st.rerun()
@@ -170,11 +182,11 @@ def student_screen():
 
             if submit_registration:
                 if not new_name.strip():
-                    st.warning('Please enter a name!')
+                    st.warning('Please provide a valid entry name!')
                 elif st.session_state.saved_photo is None:
-                    st.error('No capture found! Try again.')
+                    st.error('Missing background snapshot capture. Please return to camera view.')
                 else:
-                    with st.spinner('Creating your AI profile...'):
+                    with st.spinner('Extracting dynamic facial features...'):
                         img = np.array(Image.open(io.BytesIO(st.session_state.saved_photo)))
                         encodings = get_face_embeddings(img)
                         
@@ -193,12 +205,12 @@ def student_screen():
                                 st.session_state.student_data = response_data[0]
                                 st.session_state.show_registration = False 
                                 st.session_state.saved_photo = None
-                                st.success(f'Welcome {new_name}!')
+                                st.success(f'Account built! Welcome {new_name}!')
                                 time.sleep(1.5)
                                 st.rerun()
                             else:
-                                st.error('DB Insert failed.')
+                                st.error('Database insertion layer error.')
                         else:
-                            st.error('Could not extract facial vectors. Stand straight.')
+                            st.error('Could not extract facial vectors. Stand completely straight in well-lit area.')
 
     footer_dashboard()
