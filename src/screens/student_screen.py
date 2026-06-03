@@ -13,19 +13,63 @@ import time
 from src.components.dialog_enroll import enroll_dialog
 from src.components.subject_card import subject_card
 
+# ============================================================
+# HELPER: Fetch fresh student data from DB (Bypass session cache bug)
+# ============================================================
+def get_fresh_student_data(student_id):
+    """Live database se student ki details le aata hai - session state ke name ko ignore karta hai"""
+    all_students = get_all_students()
+    student = next((s for s in all_students if s['student_id'] == student_id), None)
+    return student
+
+# ============================================================
+# MAIN DASHBOARD FUNCTION
+# ============================================================
 def student_dashboard():
-    # Safely get current live student data
-    student_data = st.session_state.get('student_data')
-    if not student_data:
+    # Safely get current student ID from session
+    student_id = st.session_state.get('student_data', {}).get('student_id')
+    
+    if not student_id:
         st.session_state['is_logged_in'] = False
         st.session_state['login_type'] = None
+        if 'student_data' in st.session_state:
+            del st.session_state['student_data']
         st.rerun()
-        
-    student_id = student_data['student_id']
+    
+    # === FIX #1: Always fetch LIVE data from Supabase DB ===
+    student_data = get_fresh_student_data(student_id)
+    
+    if not student_data:
+        st.error("Your profile not found in database! Please register again.")
+        st.session_state['is_logged_in'] = False
+        st.session_state['login_type'] = None
+        if 'student_data' in st.session_state:
+            del st.session_state['student_data']
+        st.rerun()
+    
+    # Update session with fresh DB data (keeps UI responsive)
+    st.session_state['student_data'] = student_data
+    
+    # === FIX #2: Add Sidebar with Force Logout Button ===
+    with st.sidebar:
+        st.write("---")
+        if st.button("🔴 Force Logout & Clear Session", type="primary", use_container_width=True):
+            # Clear EVERYTHING
+            keys_to_delete = ['student_data', 'is_logged_in', 'user_role', 'show_registration', 'saved_photo']
+            for key in keys_to_delete:
+                if key in st.session_state:
+                    del st.session_state[key]
+            st.cache_resource.clear()
+            st.success("Session cleared! Redirecting...")
+            time.sleep(1)
+            st.rerun()
+    
+    # UI Layout
     c1, c2 = st.columns(2, vertical_alignment='center', gap='xxlarge')
     with c1:
         header_dashboard()
     with c2:
+        # DISPLAY CORRECT NAME FROM DB
         st.subheader(f"Welcome, {student_data.get('name', 'Student')}")
         if st.button("Logout", type='secondary', key='loginbackbtn', shortcut="control+backspace"):
             # Deep clean the session state on logout
@@ -66,7 +110,7 @@ def student_dashboard():
         stats = stats_map.get(sid, {"total": 0, "attended": 0})
         
         def unenroll_button(s_id=sid):
-            if st.button("Unenroll from this course", type='tertiary', width='stretch', key=f"unsub_{s_id}", icon=':material/delete_forever:'):
+            if st.button("Unenroll from this course", type="tertiary", width='stretch', key=f"unsub_{s_id}", icon=':material/delete_forever:'):
                 unenroll_student_to_subject(student_id, s_id)
                 st.toast(f'Unenrolled successfully!')
                 st.rerun()
@@ -146,13 +190,14 @@ def student_screen():
                         st.session_state.show_registration = True
                         st.rerun()
                     else:
+                        # === FIX #3: Fetch LIVE data from DB for login ===
                         all_students = get_all_students()
                         student = next((s for s in all_students if s['student_id'] == student_id), None)
 
                         if student:
                             st.session_state.is_logged_in = True
                             st.session_state.user_role = 'student'
-                            st.session_state.student_data = student
+                            st.session_state['student_data'] = student  # Fresh DB data save kardo
                             st.toast(f"Welcome Back {student['name']}!")
                             time.sleep(1)
                             st.rerun()
@@ -202,7 +247,7 @@ def student_screen():
                                 train_classifier()
                                 st.session_state.is_logged_in = True
                                 st.session_state.user_role = 'student'
-                                st.session_state.student_data = response_data[0]
+                                st.session_state['student_data'] = response_data[0]
                                 st.session_state.show_registration = False 
                                 st.session_state.saved_photo = None
                                 st.success(f'Account built! Welcome {new_name}!')
