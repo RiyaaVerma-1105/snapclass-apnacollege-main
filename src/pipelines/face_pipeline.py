@@ -43,9 +43,10 @@ def get_trained_model():
     
     clf = SVC(kernel='linear', probability=True, class_weight='balanced')
     try:
-        clf.fit(X, y)
+        if len(set(y)) >= 2:
+            clf.fit(X, y)
     except ValueError:
-        return None
+        pass
 
     return {'clf': clf, 'X': X, "y": y}
 
@@ -55,11 +56,13 @@ def train_classifier():
     return bool(model_data)
 
 def predict_attendance(class_image_np):
+    # CRITICAL: Har prediction par purana ziddi server cache clear karo
+    st.cache_resource.clear()
+    
     encodings = get_face_embeddings(class_image_np)
     detected_student = {}
     model_data = get_trained_model()
 
-    # Case A: Agar database khali hai, to direct unknown bhejo
     if not model_data:
         if len(encodings) > 0:
             detected_student['unknown'] = True
@@ -74,22 +77,33 @@ def predict_attendance(class_image_np):
         predicted_id = None
         is_confident = False
 
-        if len(all_students) >= 2:
+        # FIX 1: Agar 2 ya usse zyada students hain tabhi SVM prediction chalegi
+        if len(all_students) >= 2 and hasattr(clf, "classes_"):
             probs = clf.predict_proba([encoding])[0]
             max_prob_idx = np.argmax(probs)
-            if probs[max_prob_idx] >= 0.80:  # Strict 80% boundary
+            if probs[max_prob_idx] >= 0.80:  # Strict 80% confidence boundary
                 predicted_id = int(clf.classes_[max_prob_idx])
                 is_confident = True
-        else:
+        
+        # FIX 2: Agar database me sirf 1 hi student hai, toh blindly true nahi karenge
+        elif len(all_students) == 1:
             predicted_id = int(all_students[0])
-            is_confident = True
+            # Is single student ke embedding se aane wale face ka distance check karo
+            distances = [np.linalg.norm(np.array(emb) - encoding) for t_idx, emb in enumerate(X_train) if y_train[t_idx] == predicted_id]
+            min_dist = min(distances) if distances else 999.0
+            
+            # Agar distance 0.45 se kam hai tabhi bolo ki haan ye wahi bacha hai
+            if min_dist <= 0.45:
+                is_confident = True
+            else:
+                is_confident = False  # Warna unknown bna do!
 
-        if predicted_id is not None:
-            # Check distances
+        # FINAL VERIFICATION LAYER
+        if predicted_id is not None and is_confident:
             distances = [np.linalg.norm(np.array(emb) - encoding) for t_idx, emb in enumerate(X_train) if y_train[t_idx] == predicted_id]
             min_dist = min(distances) if distances else 999.0
 
-            if is_confident and min_dist <= 0.50:  # Distance thoda aur tight kiya safety ke liye
+            if min_dist <= 0.45:
                 detected_student[predicted_id] = True
             else:
                 detected_student['unknown'] = True
