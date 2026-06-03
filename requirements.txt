@@ -5,7 +5,8 @@ scikit-learn
 dlib-bin
 git+https://github.com/ageitgey/face_recognition_models
 setuptools<70.0.0
-supabase==2.0.0
+supabase
+httpx>=0.27.2
 httpcore>=1.0.8
 bcrypt
 segno
