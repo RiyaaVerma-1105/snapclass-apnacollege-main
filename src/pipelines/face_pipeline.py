@@ -75,8 +75,8 @@ def predict_attendance(class_image_np):
         
         print(f"Best match: ID {best_match_id}, Distance {best_distance:.4f}")
         
-        # MATCH THRESHOLD: 0.6 se increase kiya 0.75 tak
-        if best_match_id is not None and best_distance < 0.75:
+        # === FIX: Threshold 0.75 se ghatakar STRICT 0.45 kiya taaki naye user login na ho payen ===
+        if best_match_id is not None and best_distance < 0.45:
             detected_student[best_match_id] = True
             print(f"✅ MATCH FOUND! Student ID: {best_match_id}")
         else:
