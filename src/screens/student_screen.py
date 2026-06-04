@@ -50,20 +50,6 @@ def student_dashboard():
     # Update session with fresh DB data (keeps UI responsive)
     st.session_state['student_data'] = student_data
     
-    # === FIX #2: Add Sidebar with Force Logout Button ===
-    with st.sidebar:
-        st.write("---")
-        if st.button("🔴 Force Logout & Clear Session", type="primary", use_container_width=True):
-            # Clear EVERYTHING
-            keys_to_delete = ['student_data', 'is_logged_in', 'user_role', 'show_registration', 'saved_photo']
-            for key in keys_to_delete:
-                if key in st.session_state:
-                    del st.session_state[key]
-            st.cache_resource.clear()
-            st.success("Session cleared! Redirecting...")
-            time.sleep(1)
-            st.rerun()
-    
     # UI Layout
     c1, c2 = st.columns(2, vertical_alignment='center', gap='xxlarge')
     with c1:
@@ -127,6 +113,21 @@ def student_dashboard():
 def student_screen():
     style_background_dashboard()
     style_base_layout()
+
+    # === GLOBAL SIDEBAR: Force Logout Button (Accessible to everyone) ===
+    with st.sidebar:
+        st.write("### Session Control")
+        st.write("---")
+        if st.button("🔴 Force Logout & Clear Session", type="primary", use_container_width=True, key="global_force_logout"):
+            # Clear EVERYTHING
+            keys_to_delete = ['student_data', 'is_logged_in', 'user_role', 'show_registration', 'saved_photo', 'login_type']
+            for key in keys_to_delete:
+                if key in st.session_state:
+                    del st.session_state[key]
+            st.cache_resource.clear()
+            st.success("Session cleared! Redirecting...")
+            time.sleep(1)
+            st.rerun()
 
     # Route immediately to dashboard if valid session exists
     if st.session_state.get('is_logged_in') and "student_data" in st.session_state:
